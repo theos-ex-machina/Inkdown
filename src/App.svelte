@@ -1,28 +1,31 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import Titlebar from "./components/Titlebar.svelte";
-  import VaultPicker from "./components/VaultPicker.svelte";
-  import PageTree from "./components/PageTree.svelte";
-  import Editor from "./components/Editor.svelte";
-  import InkCanvas from "./components/InkCanvas.svelte";
-  import ModeToggle from "./components/ModeToggle.svelte";
-  import Toast from "./components/Toast.svelte";
-  import { vault } from "./lib/config.svelte";
-  import { registerShortcut } from "./lib/shortcuts";
-  import { INK_COLORS, type InkWidthName } from "./lib/ink";
-  import { onStylus } from "./lib/stylus";
+import { onMount } from "svelte";
+import Titlebar from "./components/Titlebar.svelte";
+import VaultPicker from "./components/VaultPicker.svelte";
+import PageTree from "./components/PageTree.svelte";
+import Editor from "./components/Editor.svelte";
+import InkCanvas from "./components/InkCanvas.svelte";
+import ModeToggle from "./components/ModeToggle.svelte";
+import Toast from "./components/Toast.svelte";
+import SearchPalette from "./components/SearchPalette.svelte";
+import { vault } from "./lib/config.svelte";
+import { registerShortcut } from "./lib/shortcuts";
+import { INK_COLORS, type InkWidthName } from "./lib/ink";
+import { onStylus } from "./lib/stylus";
 
-  let activePath = $state<string | null>(null);
-  let dirty = $state(false);
-  let treeRefreshKey = $state(0);
+let activePath = $state<string | null>(null);
+let dirty = $state(false);
+let treeRefreshKey = $state(0);
 
-  let sidebarCollapsed = $state(false);
-  let mode = $state<"type" | "ink">("type");
+let sidebarCollapsed = $state(false);
+let mode = $state<"type" | "ink">("type");
 
-  let inkColor = $state<string>(INK_COLORS[0]);
-  let inkWidth = $state<InkWidthName>("medium");
+let inkColor = $state<string>(INK_COLORS[0]);
+let inkWidth = $state<InkWidthName>("medium");
 
-  let editorRef: Editor | null = $state(null);
+let editorRef: Editor | null = $state(null);
+
+let showSearch = $state(false);
 
   function setMode(next: "type" | "ink") {
     if (mode === next) return;
@@ -103,6 +106,9 @@
     });
     registerShortcut("Mod+S", () => {
       // No-op: edits already auto-save after 500ms. Surface a hint.
+    });
+    registerShortcut("Mod+K", () => {
+      showSearch = !showSearch;
     });
 
     return () => {
@@ -199,6 +205,7 @@
     </div>
   {/if}
   <Toast />
+  <SearchPalette open={showSearch} onClose={() => (showSearch = false)} onSelect={selectPage} />
 </div>
 
 <style>
