@@ -4,6 +4,7 @@ pub mod markdown;
 pub mod models;
 pub mod paths;
 pub mod state;
+pub mod stylus;
 
 use state::AppState;
 
@@ -15,6 +16,11 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_fs::init())
         .manage(AppState::default())
+        .manage(stylus::StylusState::default())
+        .setup(|app| {
+            stylus::attach(app);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::pages::set_vault,
             commands::pages::current_vault,
@@ -32,6 +38,7 @@ pub fn run() {
             commands::search::search,
             commands::search::rebuild_index,
             commands::assets::import_asset,
+            stylus::set_stylus_region,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

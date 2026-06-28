@@ -33,6 +33,13 @@ blake3 = "1.8"
 
 tantivy = "0.26"
 
+# Native stylus capture: WebKitGTK reports pens as plain mice, so we read the
+# tablet tool at the GTK layer. Versions must stay in lockstep with the gtk /
+# gdk versions Tauri itself links against (see Cargo.lock).
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+gdk = "0.18"
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

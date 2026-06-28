@@ -10,6 +10,7 @@
   import { vault } from "./lib/config.svelte";
   import { registerShortcut } from "./lib/shortcuts";
   import { INK_COLORS, type InkWidthName } from "./lib/ink";
+  import { onStylus } from "./lib/stylus";
 
   let activePath = $state<string | null>(null);
   let dirty = $state(false);
@@ -47,10 +48,14 @@
   }
 
   /**
-   * Auto-switch to ink mode when a pen approaches the screen. Surface,
-   * Wacom and most Windows tablets emit `pointerover` with
-   * `pointerType === 'pen'` on hover (before the tip touches). For hardware
-   * that doesn't hover, `pointerdown` is the fallback.
+   * Auto-switch to ink mode when a pen approaches the screen.
+   *
+   * Windows/macOS: the WebView emits `pointerover`/`pointerdown` with
+   * `pointerType === 'pen'` (Surface, Wacom etc. report hover).
+   *
+   * Linux: WebKitGTK reports the stylus as a mouse, so the Rust backend
+   * watches the GTK layer instead and emits native `stylus` events; the
+   * `proximity` phase below is the Linux equivalent of pen hover.
    */
   function onWindowPointerOver(e: PointerEvent) {
     if (e.pointerType === "pen" && mode !== "ink") setMode("ink");
@@ -84,8 +89,12 @@
     return activePath.split("/");
   }
 
-  onMount(async () => {
-    await vault.init();
+  onMount(() => {
+    const unlistenStylus = onStylus((e) => {
+      if (e.phase === "proximity" && mode !== "ink") setMode("ink");
+    });
+
+    void vault.init();
     registerShortcut("Mod+\\", () => {
       sidebarCollapsed = !sidebarCollapsed;
     });
@@ -95,6 +104,10 @@
     registerShortcut("Mod+S", () => {
       // No-op: edits already auto-save after 500ms. Surface a hint.
     });
+
+    return () => {
+      void unlistenStylus.then((unlisten) => unlisten());
+    };
   });
 </script>
 
@@ -177,6 +190,7 @@
                 color={inkColor}
                 width={inkWidth}
                 onCancel={onInkCancelledByPointer}
+                onNativePenDown={() => setMode("ink")}
               />
             </div>
           </div>

@@ -1899,6 +1899,8 @@ name = "inkdown"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "gdk",
+ "gtk",
  "once_cell",
  "pulldown-cmark",
  "regex",

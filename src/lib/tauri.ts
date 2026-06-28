@@ -93,4 +93,12 @@ export const cmd = {
   rebuildIndex: () => call<void>("rebuild_index"),
   importAsset: (notePath: string, sourcePath: string) =>
     call<string>("import_asset", { notePath, sourcePath }),
+  /**
+   * Tell the backend where the ink canvas sits (CSS px, viewport-relative)
+   * so native stylus capture on Linux claims pen input only inside it.
+   * Pass `null` when no canvas is mounted.
+   */
+  setStylusRegion: (
+    region: { x: number; y: number; width: number; height: number } | null,
+  ) => call<void>("set_stylus_region", { region }),
 };

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { cmd, type InkPoint, type InkStroke } from "../lib/tauri";
   import { debounce } from "../lib/debounce";
   import {
@@ -10,6 +10,7 @@
     eraseHit,
     type InkWidthName,
   } from "../lib/ink";
+  import { onStylus, type StylusEvent } from "../lib/stylus";
 
   type Props = {
     virtualPath: string;
@@ -17,14 +18,20 @@
     color: string;
     width: InkWidthName;
     /**
-     * Fired when a non-pen pointer (mouse / touch) lands on the overlay
-     * while ink mode is active. Parent typically reverts to type mode and
-     * positions the editor cursor at the click coordinates.
+     * Fired when a mouse click lands on the overlay while ink mode is
+     * active. Parent typically reverts to type mode and positions the
+     * editor cursor at the click coordinates.
      */
     onCancel?: (clientX: number, clientY: number) => void;
+    /**
+     * Fired when a native (Linux) stylus stroke starts. Parent should
+     * switch to ink mode so the editor stops accepting input.
+     */
+    onNativePenDown?: () => void;
   };
 
-  let { virtualPath, active, color, width, onCancel }: Props = $props();
+  let { virtualPath, active, color, width, onCancel, onNativePenDown }: Props =
+    $props();
 
   let svgEl: SVGSVGElement | null = $state(null);
   let strokes = $state<InkStroke[]>([]);
@@ -64,15 +71,24 @@
     ];
   }
 
-  function isEraser(e: PointerEvent): boolean {
-    return e.pointerType === "pen" && (e.buttons === 32 || (e as PointerEvent & { button?: number }).button === 5);
+  function isDomEraser(e: PointerEvent): boolean {
+    return e.pointerType === "pen" && (e.buttons === 32 || e.button === 5);
   }
 
+  /**
+   * DOM pointer path — used on Windows/macOS where the WebView reports
+   * `pointerType === "pen"`. On Linux the pen never reaches the DOM: the
+   * Rust backend claims it at the GTK layer and streams it via `onStylus`
+   * below, so DOM events here can only be a real mouse or a touch.
+   */
   function onPointerDown(e: PointerEvent) {
     if (!active || !svgEl) return;
-    // Mouse / touch clicks land on the overlay because it's opaque while
-    // ink mode is active. We swallow them and tell the parent to revert
-    // to type mode + position the editor cursor at the click coordinates.
+    // Palm rejection: swallow touch without leaving ink mode.
+    if (e.pointerType === "touch") {
+      e.preventDefault();
+      return;
+    }
+    // Mouse click reverts to type mode at the click position.
     if (e.pointerType !== "pen") {
       e.preventDefault();
       onCancel?.(e.clientX, e.clientY);
@@ -81,7 +97,7 @@
     svgEl.setPointerCapture(e.pointerId);
     e.preventDefault();
     const p = localPoint(e);
-    if (isEraser(e)) {
+    if (isDomEraser(e)) {
       erasing = [p];
     } else {
       drawing = [p];
@@ -89,9 +105,6 @@
   }
 
   function onPointerMove(e: PointerEvent) {
-    // Once a stroke has started we trust the pointer-capture and accept
-    // every event regardless of mode flickering — that fix is what stops
-    // strokes from collapsing to straight lines if a palm-touch sneaks in.
     if (e.pointerType !== "pen") return;
     if (drawing) {
       drawing = [...drawing, localPoint(e)];
@@ -128,7 +141,7 @@
   }
 
   function onPointerUp(e: PointerEvent) {
-    if (!active || !svgEl) return;
+    if (!active || !svgEl || nativeStroke) return;
     if (svgEl.hasPointerCapture(e.pointerId)) {
       svgEl.releasePointerCapture(e.pointerId);
     }
@@ -137,9 +150,72 @@
   }
 
   function onPointerCancel(_e: PointerEvent) {
+    if (nativeStroke) return;
     drawing = null;
     erasing = null;
   }
+
+  // --- Native stylus path (Linux) -----------------------------------------
+  // WebKitGTK reports pens as mice, so the Rust backend captures the tablet
+  // tool at the GTK layer and streams it here. Coordinates arrive in CSS px
+  // relative to the viewport, same space as clientX/Y.
+
+  let nativeStroke = false;
+
+  function nativePoint(e: StylusEvent): InkPoint {
+    const rect = svgEl!.getBoundingClientRect();
+    return [
+      e.x - rect.left,
+      e.y - rect.top,
+      e.pressure || 0.5,
+      e.tiltX || 0,
+      e.tiltY || 0,
+      performance.now(),
+    ];
+  }
+
+  function onNativeStylus(e: StylusEvent) {
+    if (!svgEl || e.phase === "proximity") return;
+    if (e.phase === "down") {
+      nativeStroke = true;
+      onNativePenDown?.();
+      const p = nativePoint(e);
+      if (e.eraser) erasing = [p];
+      else drawing = [p];
+    } else if (e.phase === "motion") {
+      if (drawing) drawing = [...drawing, nativePoint(e)];
+      else if (erasing) erasing = [...erasing, nativePoint(e)];
+    } else if (e.phase === "up") {
+      if (drawing) commitStroke();
+      else if (erasing) commitErase();
+      nativeStroke = false;
+    }
+  }
+
+  // Keep the backend's claim region in sync with where the canvas sits, so
+  // pen input on the canvas is captured natively while pen input on the
+  // toolbar / sidebar still works as a normal click.
+  function reportRegion() {
+    if (!svgEl) return;
+    const r = svgEl.getBoundingClientRect();
+    void cmd.setStylusRegion({ x: r.left, y: r.top, width: r.width, height: r.height });
+  }
+
+  onMount(() => {
+    const unlistenPromise = onStylus(onNativeStylus);
+
+    reportRegion();
+    const observer = new ResizeObserver(reportRegion);
+    if (svgEl) observer.observe(svgEl);
+    window.addEventListener("resize", reportRegion);
+
+    return () => {
+      void unlistenPromise.then((unlisten) => unlisten());
+      observer.disconnect();
+      window.removeEventListener("resize", reportRegion);
+      void cmd.setStylusRegion(null);
+    };
+  });
 
   onDestroy(() => {
     saveDebounced.flush();
